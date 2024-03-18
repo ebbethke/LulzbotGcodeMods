@@ -4,9 +4,11 @@ import wx
 # replace line 22
 REMOVELEVEL = "; REMOVED: < M420 S0 > which disabled the leveling matrix \n"
 
+## Shoutout to Lulzbot forum user b-morgan for inspiring the mods. Tweaked from his example and Z offsets changed.
+## Sauce: https://forum.lulzbot.com/t/taz-quickstart-skip-leveling-wipe/7046/6
 # replace lines 27-43
 QUICKPRINT = "M117 Preparing NO leveling...; Let the user know we're on it \n\
-G1 E-1 F100 ; retract filament \n\
+G1 E-2 F100 ; retract filament \n\
 G28 XY ; home X and Y \n\
 G1 X-19 Y258 F1000 ; move to safe homing position \n\
 G28 Z ; home Z \n\
@@ -31,11 +33,10 @@ class Fastify(wx.Frame):
 		self.cwd = os.getcwd()
 
 
-	def OnOpen(self):
-
+	def onOpen(self):
 		# ask the user what new file to open
 		with wx.FileDialog(self, 
-							message="Open gcode file", 
+							message="Open gcode File to Make Fast", 
 							defaultDir=self.cwd,
 							wildcard="gcode files (*.gcode)|*.gcode",
 							style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
@@ -55,27 +56,28 @@ class Fastify(wx.Frame):
 				wx.LogError("Cannot open file '%s'." % newfile)
 			
 
-	def makeFast(self, fileobj):
-		# output name. TODO take in as optional param at run, check it's not already '_fast'
-		outpath = self.pathname.replace(".gcode", "_fast.gcode")
-		with open(outpath, "w") as outfile:
-			for row,line in enumerate(fileobj):
-				# Comment out line 22: M420 SO ; which disables the previous leveling info so we can rapid starting
-				if row == 21:
-					outfile.write(REMOVELEVEL)
-				elif row >= 26 and row <= 41:
-					# do nothing because we're replacing those lines
-					continue
-				# Write out new info from lines 27 - 43
-				elif row == 42:
-					outfile.write(QUICKPRINT)
-					# we're now at line 37 after writing all that
-				# Write out fast print message at line 47
-				elif row == 46:
-					outfile.write(NEWMESSAGE)
-				# For all the lines we're not replacing, keep them the same
-				else:
-					outfile.write(line)
+	def makeFast(self, readfrom):
+		# output name. TODO give user choice of output filename
+		defaultpath = self.pathname.replace(".gcode", "_fast.gcode")
+		# Give user a saveas file dialog for new file:
+		with wx.FileDialog(self,
+							message="Save Fast gcode As...",
+							defaultDir=self.cwd,
+							defaultFile=os.path.splitext(os.path.basename(defaultpath))[0],
+							wildcard="gcode files (*.gcode)|*.gcode",
+							style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as saveas:
+							
+			if saveas.ShowModal() == wx.ID_CANCEL:
+				self.Close()		# User changed their mind
+				return
+			outpath = saveas.GetPath()
+			
+			try:
+				with open(outpath, 'w') as saveto:
+					self.writeFile(readfrom, saveto)
+			except IOError:
+				wx.LogError("Cannot write to file '%s'." % outpath)
+		
 		
 		with wx.MessageDialog(parent=None, 
 								message=f"Done! File successfully saved to: {outpath}",
@@ -84,11 +86,34 @@ class Fastify(wx.Frame):
 				msg.ShowModal()
 		self.Close()
 	
+	def writeFile(self, original, faster):
+		""" Takes in two file objects to write out new faster gcode.
+		"""
+
+		for row,line in enumerate(original):
+			# Comment out previous line 22: M420 SO ; which disables the previous leveling info so we can rapid start
+			if row == 21:
+				faster.write(REMOVELEVEL)
+			elif row >= 26 and row <= 41:
+				# do nothing because we're replacing those lines
+				continue
+			# Write out new info from previous lines 27 - 43 to skip bed level and wipe
+			# QUICKPRINT simplifies setup and just homes axes, hovers 10mm Z, retracts filament, and heats up.
+			elif row == 42:
+				faster.write(QUICKPRINT)
+				# new file will be at line 36 after writing all that
+			# Write out fast print message at previous line 47
+			elif row == 46:
+				faster.write(NEWMESSAGE)
+			# For all the lines we're not replacing, keep them the same
+			else:
+				faster.write(line)
+
 	
 if __name__ == "__main__":
 	app = wx.App(False)
 	win = Fastify()
-	win.OnOpen()
+	win.onOpen()
 	app.MainLoop()
 	
-			
+	
